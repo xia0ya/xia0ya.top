@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}用户管理 - Amazon评论爬虫{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">用户管理</h1>
+
+{% if request.query_params.get('error') == 'exists' %}
+<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+    用户名已存在
+</div>
+{% elif request.query_params.get('error') == 'empty' %}
+<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+    用户名和密码不能为空
+</div>
+{% elif request.query_params.get('error') == 'self' %}
+<div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+    不能删除当前登录账号
+</div>
+{% elif request.query_params.get('success') %}
+<div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
+    操作成功
+</div>
+{% endif %}
+
+<div class="bg-white rounded-lg shadow p-6 mb-6">
+    <h2 class="text-lg font-bold mb-4">添加用户</h2>
+    <form method="post" action="/users/add" class="flex flex-wrap gap-4 items-end">
+        <div>
+            <label class="block text-gray-700 text-sm mb-1">用户名</label>
+            <input type="text" name="username" required
+                class="border rounded px-3 py-2 w-40">
+        </div>
+        <div>
+            <label class="block text-gray-700 text-sm mb-1">密码</label>
+            <input type="password" name="password" required
+                class="border rounded px-3 py-2 w-40">
+        </div>
+        <button type="submit"
+            class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+            添加
+        </button>
+    </form>
+</div>
+
+<div class="bg-white rounded-lg shadow overflow-hidden">
+    <table class="min-w-full">
+        <thead class="bg-gray-50">
+            <tr>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">用户名</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">创建时间</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">操作</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+            {% for user in users %}
+            <tr>
+                <td class="px-4 py-3">{{ user.id }}</td>
+                <td class="px-4 py-3">{{ user.username }}</td>
+                <td class="px-4 py-3 text-sm text-gray-500">{{ user.created_at }}</td>
+                <td class="px-4 py-3">
+                    {% if user.username != current_user %}
+                    <form method="post" action="/users/delete" class="inline"
+                        onsubmit="return confirm('确定要删除用户 {{ user.username }} 吗？')">
+                        <input type="hidden" name="user_id" value="{{ user.id }}">
+                        <button type="submit" class="text-red-600 hover:underline">删除</button>
+                    </form>
+                    {% else %}
+                    <span class="text-gray-400">当前用户</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

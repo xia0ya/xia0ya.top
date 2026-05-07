@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Amazon评论爬虫{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/css/custom.css">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    {% if current_user %}
+    <nav class="bg-white shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+            <div class="flex space-x-6">
+                <a href="/dashboard" class="nav-link {{ 'active' if request.url.path == '/dashboard' }}">首页</a>
+                <a href="/reviews" class="nav-link {{ 'active' if request.url.path == '/reviews' }}">评论列表</a>
+                <a href="/analytics" class="nav-link {{ 'active' if request.url.path == '/analytics' }}">数据分析</a>
+                <a href="/users" class="nav-link {{ 'active' if request.url.path == '/users' }}">用户管理</a>
+                <a href="/help" class="nav-link {{ 'active' if request.url.path == '/help' }}">使用说明</a>
+            </div>
+            <div class="flex items-center space-x-4">
+                <span class="text-gray-600">{{ current_user }}</span>
+                <a href="/logout" class="text-red-600 hover:underline">登出</a>
+            </div>
+        </div>
+    </nav>
+    {% endif %}
+
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

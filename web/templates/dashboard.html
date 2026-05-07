@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block title %}首页 - Amazon评论爬虫{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex justify-between items-center">
+        <h1 class="text-2xl font-bold">提交爬取任务</h1>
+        <form method="post" action="/dashboard/stop" class="inline">
+            <button type="submit" class="bg-red-600 text-white font-bold py-2 px-4 rounded hover:bg-red-700">
+                停止全部任务
+            </button>
+        </form>
+    </div>
+
+    <div class="bg-white rounded-lg shadow p-6">
+        <form method="post" action="/dashboard/submit">
+            <label class="block text-gray-700 text-sm font-bold mb-2">
+                输入Amazon商品链接（支持多个，每行一个）
+            </label>
+            <textarea name="urls" rows="5" required
+                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="https://www.amazon.com/...&#10;https://www.amazon.com/..."></textarea>
+
+            <button type="submit"
+                class="mt-4 bg-blue-600 text-white font-bold py-2 px-6 rounded hover:bg-blue-700">
+                开始爬取
+            </button>
+        </form>
+    </div>
+
+    {% if submit_results %}
+    <div class="bg-white rounded-lg shadow p-6">
+        <h2 class="text-lg font-bold mb-4">解析结果</h2>
+        <div class="space-y-2">
+            {% for r in submit_results %}
+            <div class="flex items-center space-x-2">
+                {% if r.success %}
+                <span class="text-green-600">✓</span>
+                <span>{{ r.asin }}</span>
+                {% else %}
+                <span class="text-red-600">✗</span>
+                <span class="text-gray-500">{{ r.asin }} - {{ r.error }}</span>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="bg-white rounded-lg shadow p-6">
+        <h2 class="text-lg font-bold mb-4">设置Cookie（可选）</h2>
+        <form method="post" action="/dashboard/cookie">
+            <p class="text-sm text-gray-600 mb-2">从浏览器开发者工具复制的cookies.json内容，粘贴到下方</p>
+            <textarea name="cookies_json" rows="8"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                placeholder='[{"domain": ".amazon.com", "name": "...", ...}, ...]'>{{ current_cookies_status }}</textarea>
+            <button type="submit" class="mt-2 bg-green-600 text-white font-bold py-2 px-6 rounded hover:bg-green-700">
+                保存Cookie
+            </button>
+        </form>
+        {% if cookie_success %}
+        <p class="mt-2 text-green-600">Cookie保存成功</p>
+        {% endif %}
+    </div>
+
+    <h1 class="text-2xl font-bold">任务列表</h1>
+    <div class="bg-white rounded-lg shadow overflow-hidden">
+        <table class="min-w-full">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ASIN</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">状态</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">评论数</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">时间</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">操作</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200" id="task-table-body">
+                {% for task in tasks %}
+                <tr id="task-row-{{ task.id }}">
+                    <td class="px-4 py-3">{{ task.asin }}</td>
+                    <td class="px-4 py-3">
+                        <span class="px-2 py-1 text-xs rounded
+                            {% if task.status == 'completed' %}bg-green-100 text-green-800
+                            {% elif task.status == 'running' %}bg-blue-100 text-blue-800 animate-pulse
+                            {% elif task.status == 'failed' %}bg-red-100 text-red-800
+                            {% else %}bg-gray-100 text-gray-800{% endif %}">
+                            {{ task.status }}
+                        </span>
+                        {% if task.error and task.status == 'failed' %}
+                        <span class="text-xs text-red-500 ml-1">{{ task.error }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3">{{ task.review_count }}</td>
+                    <td class="px-4 py-3 text-sm text-gray-500">{{ task.created_at }}</td>
+                    <td class="px-4 py-3">
+                        {% if task.status in ['pending', 'running'] %}
+                        <form method="post" action="/dashboard/stop-one" class="inline">
+                            <input type="hidden" name="task_id" value="{{ task.id }}">
+                            <button type="submit" class="text-red-600 hover:underline text-sm">停止</button>
+                        </form>
+                        {% endif %}
+                        <form method="post" action="/dashboard/delete-task" class="inline"
+                            onsubmit="return confirm('确定要删除这个任务吗？')">
+                            <input type="hidden" name="task_id" value="{{ task.id }}">
+                            <button type="submit" class="text-gray-600 hover:underline text-sm ml-2">删除</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if not tasks %}
+        <p class="p-4 text-gray-500 text-center">暂无任务</p>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+let pageReloading = false;
+
+function updateTasks() {
+    fetch('/api/tasks/status')
+        .then(r => r.json())
+        .then(data => {
+            // 更新每个任务的状态
+            data.tasks.forEach(task => {
+                const row = document.getElementById('task-row-' + task.id);
+                if (row) {
+                    const statusSpan = row.querySelector('td:nth-child(2) span');
+                    if (statusSpan) {
+                        statusSpan.className = 'px-2 py-1 text-xs rounded ' + getStatusClass(task.status);
+                        statusSpan.textContent = task.status;
+                    }
+                    const countCell = row.querySelector('td:nth-child(3)');
+                    if (countCell) countCell.textContent = task.review_count;
+                    const actionCell = row.querySelector('td:nth-child(5)');
+                    if (actionCell && task.status === 'completed') {
+                        actionCell.innerHTML = '';
+                    }
+                }
+            });
+
+            // 如果有正在运行的任务，每3秒刷新一次
+            if (data.has_running) {
+                setTimeout(updateTasks, 3000);
+            }
+        })
+        .catch(() => {
+            // 失败时静默，不影响用户体验
+        });
+}
+
+function getStatusClass(status) {
+    switch(status) {
+        case 'completed': return 'bg-green-100 text-green-800';
+        case 'running': return 'bg-blue-100 text-blue-800 animate-pulse';
+        case 'failed': return 'bg-red-100 text-red-800';
+        default: return 'bg-gray-100 text-gray-800';
+    }
+}
+
+// 页面加载后立即检查一次状态
+document.addEventListener('DOMContentLoaded', () => updateTasks());
+</script>
+{% endblock %}

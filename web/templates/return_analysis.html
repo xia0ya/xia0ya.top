@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>退货分析 - Amazon评论爬虫</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+    <style>
+        .card { transition: all 0.3s ease; }
+        .card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .collapsed .card-content { display: none; }
+        .card-header { cursor: pointer; user-select: none; }
+        .card-header::after { content: '▼'; float: right; transition: transform 0.2s; }
+        .collapsed .card-header::after { transform: rotate(-90deg); }
+        .loading { opacity: 0.5; pointer-events: none; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <!-- 导航栏 -->
+    <nav class="bg-white shadow-sm mb-6">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+            <div class="flex space-x-6">
+                <a href="/dashboard" class="nav-link text-gray-700 hover:text-blue-600">首页</a>
+                <a href="/reviews" class="nav-link text-gray-700 hover:text-blue-600">评论列表</a>
+                <a href="/analytics" class="nav-link text-gray-700 hover:text-blue-600">数据分析</a>
+                <a href="/return" class="nav-link text-blue-600 font-bold border-b-2 border-blue-600">退货分析</a>
+                <a href="/users" class="nav-link text-gray-700 hover:text-blue-600">用户管理</a>
+                <a href="/help" class="nav-link text-gray-700 hover:text-blue-600">使用说明</a>
+            </div>
+            <div class="flex items-center space-x-4">
+                <a href="/logout" class="text-red-600 hover:underline">登出</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="max-w-7xl mx-auto px-4 py-6">
+        <!-- 头部 -->
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-2xl font-bold">退货分析</h1>
+            <div class="flex gap-4 items-center flex-wrap">
+                <select id="versionSelect" class="border rounded px-3 py-2">
+                    <option value="">选择版本</option>
+                </select>
+                <button onclick="deleteVersion()" class="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700">删除版本</button>
+                <div class="flex items-center gap-2">
+                    <label class="text-sm text-gray-600">日期筛选:</label>
+                    <input type="date" id="startDate" class="border rounded px-2 py-1 text-sm">
+                    <span>至</span>
+                    <input type="date" id="endDate" class="border rounded px-2 py-1 text-sm">
+                    <button onclick="applyDateFilter()" class="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700">应用</button>
+                    <button onclick="resetDateFilter()" class="bg-gray-500 text-white px-3 py-1 rounded text-sm hover:bg-gray-600">重置</button>
+                </div>
+                <button onclick="showUploadModal()" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">
+                    上传数据
+                </button>
+                <a href="/dashboard" class="text-blue-600 hover:underline">返回主站</a>
+            </div>
+        </div>
+
+        <!-- 上传提示 -->
+        <div id="uploadPrompt" class="hidden bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded mb-6">
+            <p><strong>提示：</strong>当前没有分析数据，请先上传CSV文件并运行分析。</p>
+            <button onclick="showUploadModal()" class="mt-2 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                上传数据
+            </button>
+        </div>
+
+        <!-- 加载指示器 -->
+        <div id="loading" class="hidden text-center py-8">
+            <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent"></div>
+            <p class="mt-2 text-gray-600">加载中...</p>
+        </div>
+
+        <!-- 内容区域 -->
+        <div id="content" class="hidden space-y-4">
+            <!-- AI智能洞察 -->
+            <div class="card bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg shadow border border-blue-200">
+                <div class="card-header p-4 border-b border-blue-200 flex justify-between items-center" onclick="toggleCard(this)">
+                    <h2 class="text-lg font-bold text-blue-700">🔍 AI 智能洞察</h2>
+                    <button id="refreshInsightBtn" onclick="event.stopPropagation();getInsights()" class="text-sm bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700">刷新分析</button>
+                </div>
+                <div class="card-content p-4">
+                    <div id="insightLoading" class="hidden text-center py-4">
+                        <div class="inline-block animate-spin rounded-full h-6 w-6 border-2 border-blue-500 border-t-transparent"></div>
+                        <span class="ml-2 text-gray-600">AI分析中...</span>
+                    </div>
+                    <div id="insightContent" class="prose prose-sm max-w-none">
+                        <p class="text-gray-500 italic">点击"刷新分析"获取AI洞察</p>
+                    </div>
+                    <div id="insightError" class="hidden text-red-600"></div>
+                </div>
+            </div>
+
+            <!-- 总览统计 -->
+            <div class="card bg-white rounded-lg shadow">
+                <div class="card-header p-4 border-b" onclick="toggleCard(this)">
+                    <h2 class="text-lg font-bold inline-block">总览统计</h2>
+                    <span id="dateRange" class="ml-4 text-sm text-gray-500"></span>
+                </div>
+                <div class="card-content p-4">
+                    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                        <div class="text-center p-3 bg-gray-50 rounded">
+                            <div class="text-gray-500 text-sm">总退货订单</div>
+                            <div id="totalOrders" class="text-2xl font-bold text-blue-600">-</div>
+                        </div>
+                        <div class="text-center p-3 bg-gray-50 rounded">
+                            <div class="text-gray-500 text-sm">总退货金额</div>
+                            <div id="totalAmount" class="text-2xl font-bold text-green-600">-</div>
+                        </div>
+                        <div class="text-center p-3 bg-gray-50 rounded">
+                            <div class="text-gray-500 text-sm">总退货数量</div>
+                            <div id="totalQuantity" class="text-2xl font-bold text-purple-600">-</div>
+                        </div>
+                        <div class="text-center p-3 bg-gray-50 rounded">
+                            <div class="text-gray-500 text-sm">平均退货金额</div>
+                            <div id="avgAmount" class="text-2xl font-bold text-orange-600">-</div>
+                        </div>
+                        <div class="text-center p-3 bg-gray-50 rounded">
+                            <div class="text-gray-500 text-sm">仅退款</div>
+                            <div id="refundOnly" class="text-2xl font-bold text-gray-600">-</div>
+                        </div>
+                        <div class="text-center p-3 bg-gray-50 rounded">
+                            <div class="text-gray-500 text-sm">退货退款</div>
+                            <div id="returnRefund" class="text-2xl font-bold text-red-600">-</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 退货率统计 -->
+            <div class="card bg-white rounded-lg shadow collapsed">
+                <div class="card-header p-4 border-b" onclick="toggleCard(this)">
+                    <h2 class="text-lg font-bold">退货率统计</h2>
+                </div>
+                <div class="card-content p-4">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                        <div>
+                            <h3 class="font-bold mb-3">月度退货率</h3>
+                            <div class="overflow-x-auto">
+                                <table id="monthlyReturnRateTable" class="w-full text-sm">
+                                    <thead><tr><th>月份</th><th>总订单数</th><th>退货订单数</th><th>退货率</th></tr></thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div>
+                            <h3 class="font-bold mb-3">月度退货率趋势</h3>
+                            <canvas id="monthlyReturnRateChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div>
+                            <h3 class="font-bold mb-3">周退货率</h3>
+                            <div class="overflow-x-auto">
+                                <table id="weeklyReturnRateTable" class="w-full text-sm">
+                                    <thead><tr><th>时段</th><th>总订单数</th><th>退货订单数</th><th>退货率</th></tr></thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div>
+                            <h3 class="font-bold mb-3">周退货率趋势</h3>
+                            <canvas id="weeklyReturnRateChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 按日期统计 -->
+            <div class="card bg-white rounded-lg shadow collapsed">
+                <div class="card-header p-4 border-b" onclick="toggleCard(this)">
+                    <h2 class="text-lg font-bold">按日期统计</h2>
+                </div>
+                <div class="card-content p-4">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div class="overflow-x-auto">
+                            <table id="dailyTable" class="w-full text-sm">
+                                <thead><tr><th>日期</th><th>退货订单数</th><th>退货金额</th><th>退货数量</th><th>平均退货金额</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div>
+                            <canvas id="dailyChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 按退货类型统计 -->
+            <div class="card bg-white rounded-lg shadow collapsed">
+                <div class="card-header p-4 border-b" onclick="toggleCard(this)">
+                    <h2 class="text-lg font-bold">按退货类型统计</h2>
+                </div>
+                <div class="card-content p-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <canvas id="typeChart"></canvas>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table id="typeTable" class="w-full text-sm">
+                                <thead><tr><th>退货类型</th><th>订单数</th><th>退货金额</th><th>退货数量</th><th>占比</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 按退货原因统计 -->
+            <div class="card bg-white rounded-lg shadow collapsed">
+                <div class="card-header p-4 border-b" onclick="toggleCard(this)">
+                    <h2 class="text-lg font-bold">按退货原因统计</h2>
+                </div>
+                <div class="card-content p-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <canvas id="reasonChart"></canvas>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table id="reasonTable" class="w-full text-sm">
+                                <thead><tr><th>退货原因</th><th>中文</th><th>订单数</th><th>退货金额</th><th>占比</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 月度趋势图表 -->
+            <div class="card bg-white rounded-lg shadow collapsed">
+                <div class="card-header p-4 border-b" onclick="toggleCard(this)">
+                    <h2 class="text-lg font-bold">月度退货趋势</h2>
+                </div>
+                <div class="card-content p-4">
+                    <canvas id="monthlyChart"></canvas>
+                </div>
+            </div>
+
+            <!-- 退货订单明细 -->
+            <div class="card bg-white rounded-lg shadow collapsed">
+                <div class="card-header p-4 border-b" onclick="toggleCard(this)">
+                    <h2 class="text-lg font-bold">退货订单明细</h2>
+                </div>
+                <div class="card-content p-4">
+                    <div class="overflow-x-auto">
+                        <table id="detailsTable" class="w-full text-sm">
+                            <thead>
+                                <tr>
+                                    <th>日期</th>
+                                    <th>订单号</th>
+                                    <th>要求退款金额</th>
+                                    <th>Seller SKU</th>
+                                    <th>退货类型</th>
+                                    <th>退款原因</th>
+                                    <th>退款原因（中文）</th>
+                                    <th>实际退款金额</th>
+                                    <th>退款数量</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top SKU排行 -->
+            <div class="card bg-white rounded-lg shadow collapsed">
+                <div class="card-header p-4 border-b" onclick="toggleCard(this)">
+                    <h2 class="text-lg font-bold">SKU退货金额排行 (Top 20)</h2>
+                </div>
+                <div class="card-content p-4">
+                    <canvas id="skuChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 上传弹窗 -->
+    <div id="uploadModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+            <h3 class="text-lg font-bold mb-4">上传数据</h3>
+            <form id="uploadForm">
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm mb-2">版本日期</label>
+                    <input type="date" id="versionDate" class="border rounded px-3 py-2 w-full" required>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm mb-2">退货数据文件 (CSV)</label>
+                    <input type="file" id="returnFile" accept=".csv" class="border rounded px-3 py-2 w-full" required>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm mb-2">全部订单文件 (Excel, 可选)</label>
+                    <input type="file" id="allOrdersFile" accept=".xlsx,.xls" class="border rounded px-3 py-2 w-full">
+                </div>
+                <div class="flex justify-end gap-3">
+                    <button type="button" onclick="hideUploadModal()" class="px-4 py-2 border rounded hover:bg-gray-100">取消</button>
+                    <button type="submit" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700">上传并分析</button>
+                </div>
+            </form>
+            <div id="uploadProgress" class="hidden mt-4">
+                <div class="text-center py-4">
+                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-500 border-t-transparent"></div>
+                    <p class="mt-2 text-gray-600">上传分析中，请稍候...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentVersion = '';
+        let charts = {};
+        let rawData = null;  // 存储原始数据
+        let filteredData = null;  // 存储过滤后数据
+
+        // 切换卡片展开/折叠
+        function toggleCard(header) {
+            header.parentElement.classList.toggle('collapsed');
+        }
+
+        // 显示上传弹窗
+        function showUploadModal() {
+            document.getElementById('uploadModal').classList.remove('hidden');
+            document.getElementById('versionDate').valueAsDate = new Date();
+            document.getElementById('uploadProgress').classList.add('hidden');
+            document.getElementById('uploadForm').classList.remove('hidden');
+        }
+
+        // 隐藏上传弹窗
+        function hideUploadModal() {
+            document.getElementById('uploadModal').classList.add('hidden');
+        }
+
+        // 获取AI洞察
+        async function getInsights() {
+            if (!currentVersion) return;
+            const loading = document.getElementById('insightLoading');
+            const content = document.getElementById('insightContent');
+            const error = document.getElementById('insightError');
+
+            loading.classList.remove('hidden');
+            content.classList.add('hidden');
+            error.classList.add('hidden');
+
+            try {
+                const formData = new FormData();
+                formData.append('version', currentVersion);
+                const resp = await fetch('/return/api/insights', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await resp.json();
+                if (result.success) {
+                    content.innerHTML = result.insight.replace(/\n/g, '<br>');
+                    content.classList.remove('hidden');
+                } else {
+                    error.textContent = '分析失败: ' + result.error;
+                    error.classList.remove('hidden');
+                }
+            } catch (e) {
+                error.textContent = '网络错误: ' + e.message;
+                error.classList.remove('hidden');
+            } finally {
+                loading.classList.add('hidden');
+            }
+        }
+
+        // 删除版本
+        async function deleteVersion() {
+            const version = document.getElementById('versionSelect').value;
+            if (!version) {
+                alert('请先选择一个版本');
+                return;
+            }
+            if (!confirm(`确定要删除版本 "${version}" 吗？此操作不可恢复。`)) {
+                return;
+            }
+            try {
+                const resp = await fetch(`/return/api/version/${version}`, { method: 'DELETE' });
+                const result = await resp.json();
+                if (result.success) {
+                    alert('版本已删除');
+                    loadVersions();
+                } else {
+                    alert('删除失败: ' + result.error);
+                }
+            } catch (e) {
+                alert('删除失败: ' + e.message);
+            }
+        }
+
+        // 加载版本列表
+        async function loadVersions() {
+            try {
+                const resp = await fetch('/return/api/versions');
+                const data = await resp.json();
+                const select = document.getElementById('versionSelect');
+                select.innerHTML = '<option value="">选择版本</option>';
+                data.versions.forEach(v => {
+                    const opt = document.createElement('option');
+                    opt.value = v.name;
+                    opt.textContent = v.name + (v.has_result ? '' : ' (待分析)');
+                    select.appendChild(opt);
+                });
+                if (data.versions.length > 0) {
+                    select.value = data.versions[0].name;
+                    loadData(data.versions[0].name);
+                } else {
+                    document.getElementById('uploadPrompt').classList.remove('hidden');
+                }
+            } catch (e) {
+                console.error('加载版本失败:', e);
+            }
+        }
+
+        // 加载数据
+        async function loadData(version) {
+            currentVersion = version;
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('content').classList.add('hidden');
+            document.getElementById('uploadPrompt').classList.add('hidden');
+            // 重置日期筛选
+            document.getElementById('startDate').value = '';
+            document.getElementById('endDate').value = '';
+
+            try {
+                const resp = await fetch(`/return/api/data/${version}`);
+                if (!resp.ok) throw new Error('数据不存在');
+                const data = await resp.json();
+                rawData = data;
+                filteredData = null;
+                renderData(data);
+                // 设置日期输入范围
+                if (data.daily && data.daily.length > 0) {
+                    const dates = data.daily.map(d => d['日期']).filter(Boolean).sort();
+                    if (dates.length > 0) {
+                        // dates格式是 "2024.12.13"
+                        document.getElementById('startDate').min = dates[0].replace(/\./g, '-');
+                        document.getElementById('endDate').min = dates[0].replace(/\./g, '-');
+                        document.getElementById('startDate').max = dates[dates.length - 1].replace(/\./g, '-');
+                        document.getElementById('endDate').max = dates[dates.length - 1].replace(/\./g, '-');
+                    }
+                }
+                document.getElementById('content').classList.remove('hidden');
+                // 加载AI洞察
+                getInsights();
+            } catch (e) {
+                console.error('加载数据失败:', e);
+                document.getElementById('uploadPrompt').classList.remove('hidden');
+            } finally {
+                document.getElementById('loading').classList.add('hidden');
+            }
+        }
+
+        // 日期筛选
+        function applyDateFilter() {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+
+            if (!rawData) return;
+
+            if (!startDate && !endDate) {
+                filteredData = null;
+                renderData(rawData);
+                return;
+            }
+
+            // 转换日期格式 "2024.12.13" -> "2024-12-13"
+            const parseDate = (dateStr) => {
+                if (!dateStr) return null;
+                return dateStr.replace(/\./g, '-');
+            };
+
+            const start = startDate ? new Date(startDate) : null;
+            const end = endDate ? new Date(endDate) : null;
+
+            // 过滤details
+            const filteredDetails = rawData.details.filter(d => {
+                const date = parseDate(d['日期']);
+                if (!date) return true;
+                const parsedDate = new Date(date);
+                if (start && parsedDate < start) return false;
+                if (end && parsedDate > end) return false;
+                return true;
+            });
+
+            // 重新计算统计数据
+            const filtered = JSON.parse(JSON.stringify(rawData));
+            filtered.details = filteredDetails;
+
+            // 重新计算总览
+            filtered.overview = {
+                总退货订单数: filteredDetails.length,
+                总退货金额: filteredDetails.reduce((sum, d) => sum + (d['实际退款金额'] || 0), 0),
+                总退货数量: filteredDetails.reduce((sum, d) => sum + (d['退款数量'] || 0), 0),
+                平均退货金额: 0,
+                仅退款订单数: filteredDetails.filter(d => d['退货类型'] === 'Refund only').length,
+                退货退款订单数: filteredDetails.filter(d => d['退货类型'] === 'Return and refund').length
+            };
+            if (filteredDetails.length > 0) {
+                filtered.overview.平均退货金额 = filtered.overview.总退货金额 / filteredDetails.length;
+            }
+
+            // 重新计算按日期统计
+            const dailyMap = {};
+            filteredDetails.forEach(d => {
+                const date = d['日期'];
+                if (!dailyMap[date]) {
+                    dailyMap[date] = { 日期: date, 退货订单数: 0, 退货金额: 0, 退货数量: 0 };
+                }
+                dailyMap[date].退货订单数++;
+                dailyMap[date].退货金额 += d['实际退款金额'] || 0;
+                dailyMap[date].退货数量 += d['退款数量'] || 0;
+            });
+            filtered.daily = Object.values(dailyMap).map(d => ({
+                ...d,
+                平均退货金额: d.退货订单数 > 0 ? d.退货金额 / d.退货订单数 : 0
+            })).sort((a, b) => a['日期'].localeCompare(b['日期']));
+
+            // 重新计算按类型统计
+            const typeMap = {};
+            filteredDetails.forEach(d => {
+                const type = d['退货类型'];
+                if (!typeMap[type]) {
+                    typeMap[type] = { 退货类型: type, 订单数: 0, 退货金额: 0, 退货数量: 0 };
+                }
+                typeMap[type].订单数++;
+                typeMap[type].退货金额 += d['实际退款金额'] || 0;
+                typeMap[type].退货数量 += d['退款数量'] || 0;
+            });
+            const totalTypeOrders = Object.values(typeMap).reduce((sum, t) => sum + t.订单数, 0);
+            filtered.by_type = Object.values(typeMap).map(t => ({
+                ...t,
+                占比: totalTypeOrders > 0 ? (t.订单数 / totalTypeOrders * 100) : 0
+            }));
+
+            // 重新计算按原因统计
+            const reasonMap = {};
+            filteredDetails.forEach(d => {
+                const reason = d['退款原因'];
+                if (!reasonMap[reason]) {
+                    reasonMap[reason] = { 退货原因: reason, 原因中文: d['退款原因（中文）'], 订单数: 0, 退货金额: 0 };
+                }
+                reasonMap[reason].订单数++;
+                reasonMap[reason].退货金额 += d['实际退款金额'] || 0;
+            });
+            const totalReasonOrders = Object.values(reasonMap).reduce((sum, r) => sum + r.订单数, 0);
+            filtered.by_reason = Object.values(reasonMap).map(r => ({
+                ...r,
+                占比: totalReasonOrders > 0 ? (r.订单数 / totalReasonOrders * 100) : 0
+            })).sort((a, b) => b.订单数 - a.订单数);
+
+            // 重新计算月度统计
+            const monthMap = {};
+            filteredDetails.forEach(d => {
+                const month = d['日期'].substring(0, 7); // "2024.12"
+                if (!monthMap[month]) {
+                    monthMap[month] = { 月份: month, 退货订单数: 0, 退货金额: 0, 退货数量: 0 };
+                }
+                monthMap[month].退货订单数++;
+                monthMap[month].退货金额 += d['实际退款金额'] || 0;
+                monthMap[month].退货数量 += d['退款数量'] || 0;
+            });
+            filtered.monthly = Object.values(monthMap).sort((a, b) => a.月份.localeCompare(b.月份));
+
+            // 重新计算SKU统计
+            const skuMap = {};
+            filteredDetails.forEach(d => {
+                const sku = d['Seller SKU'];
+                if (!skuMap[sku]) {
+                    skuMap[sku] = { SKU: sku, 退货订单数: 0, 退货金额: 0, 退货数量: 0 };
+                }
+                skuMap[sku].退货订单数++;
+                skuMap[sku].退货金额 += d['实际退款金额'] || 0;
+                skuMap[sku].退货数量 += d['退款数量'] || 0;
+            });
+            filtered.top_skus = Object.values(skuMap)
+                .sort((a, b) => b.退货金额 - a.退货金额)
+                .slice(0, 20);
+
+            filteredData = filtered;
+            renderData(filtered);
+        }
+
+        // 重置日期筛选
+        function resetDateFilter() {
+            document.getElementById('startDate').value = '';
+            document.getElementById('endDate').value = '';
+            filteredData = null;
+            if (rawData) {
+                renderData(rawData);
+            }
+        }
+
+        // 渲染数据
+        function renderData(data) {
+            // 总览
+            document.getElementById('totalOrders').textContent = data.overview.总退货订单数;
+            document.getElementById('totalAmount').textContent = '$' + data.overview.总退货金额.toFixed(2);
+            document.getElementById('totalQuantity').textContent = data.overview.总退货数量;
+            document.getElementById('avgAmount').textContent = '$' + data.overview.平均退货金额.toFixed(2);
+            document.getElementById('refundOnly').textContent = data.overview.仅退款订单数;
+            document.getElementById('returnRefund').textContent = data.overview.退货退款订单数;
+
+            // 日期范围
+            if (data.details && data.details.length > 0) {
+                const dates = data.details.map(d => d['日期']).filter(Boolean).sort();
+                if (dates.length > 0) {
+                    const startDate = dates[0];
+                    const endDate = dates[dates.length - 1];
+                    document.getElementById('dateRange').textContent = `数据时间范围: ${startDate} 至 ${endDate}`;
+                } else {
+                    document.getElementById('dateRange').textContent = '';
+                }
+            } else {
+                document.getElementById('dateRange').textContent = '';
+            }
+
+            // 退货率统计
+            if (data.return_rate) {
+                renderTable('monthlyReturnRateTable', data.return_rate.monthly_return_rate, ['月份', '总订单数', '退货订单数', '退货率']);
+                renderTable('weeklyReturnRateTable', data.return_rate.weekly, ['时段', '总订单数', '退货订单数', '退货率']);
+                renderMonthlyReturnRateChart(data.return_rate.monthly_return_rate);
+                renderWeeklyReturnRateChart(data.return_rate.weekly);
+            }
+
+            // 按日期统计
+            renderTable('dailyTable', data.daily, ['日期', '退货订单数', '退货金额', '退货数量', '平均退货金额']);
+
+            // 按退货类型统计
+            renderTable('typeTable', data.by_type, ['退货类型', '订单数', '退货金额', '退货数量', '占比']);
+            renderTypeChart(data.by_type);
+
+            // 按退货原因统计
+            renderTable('reasonTable', data.by_reason, ['退货原因', '原因中文', '订单数', '退货金额', '占比']);
+            renderReasonChart(data.by_reason);
+
+            // 月度趋势
+            renderMonthlyChart(data.monthly);
+
+            // 按日期趋势
+            renderDailyChart(data.daily);
+
+            // 订单明细
+            renderDetailsTable(data.details);
+
+            // SKU排行
+            renderSkuChart(data.top_skus);
+        }
+
+        // 渲染表格
+        function renderTable(tableId, data, columns) {
+            const tbody = document.querySelector(`#${tableId} tbody`);
+            tbody.innerHTML = '';
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+                tr.className = 'border-b hover:bg-gray-50';
+                columns.forEach(col => {
+                    const td = document.createElement('td');
+                    td.className = 'px-3 py-2';
+                    let val = row[col];
+                    if (typeof val === 'number') val = val.toFixed(2);
+                    td.textContent = val ?? '';
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+        }
+
+        // 渲染订单明细
+        function renderDetailsTable(data) {
+            const tbody = document.querySelector('#detailsTable tbody');
+            tbody.innerHTML = '';
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+                tr.className = 'border-b hover:bg-gray-50';
+                ['日期', '订单号', '要求退款金额', 'Seller SKU', '退货类型', '退款原因', '退款原因（中文）', '实际退款金额', '退款数量'].forEach(col => {
+                    const td = document.createElement('td');
+                    td.className = 'px-3 py-2';
+                    let val = row[col];
+                    if (col === '要求退款金额' || col === '实际退款金额') {
+                        val = val ? '$' + Number(val).toFixed(2) : '';
+                    }
+                    td.textContent = val ?? '';
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+        }
+
+        // 图表渲染
+        function renderTypeChart(data) {
+            const ctx = document.getElementById('typeChart').getContext('2d');
+            if (charts.type) charts.type.destroy();
+            charts.type = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: data.map(d => d.退货类型),
+                    datasets: [{ data: data.map(d => d.订单数), backgroundColor: ['#3b82f6', '#ef4444'] }]
+                },
+                options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+            });
+        }
+
+        function renderReasonChart(data) {
+            const ctx = document.getElementById('reasonChart').getContext('2d');
+            if (charts.reason) charts.reason.destroy();
+            const top5 = data.slice(0, 10);
+            charts.reason = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: top5.map(d => d.原因中文),
+                    datasets: [{ label: '订单数', data: top5.map(d => d.订单数), backgroundColor: '#ef4444' }]
+                },
+                options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } } }
+            });
+        }
+
+        function renderMonthlyChart(data) {
+            const ctx = document.getElementById('monthlyChart').getContext('2d');
+            if (charts.monthly) charts.monthly.destroy();
+            charts.monthly = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.map(d => d.月份),
+                    datasets: [
+                        { label: '退货订单数', data: data.map(d => d.退货订单数), backgroundColor: '#3b82f6' },
+                        { label: '退货金额', data: data.map(d => d.退货金额), type: 'line', borderColor: '#ef4444' }
+                    ]
+                },
+                options: { responsive: true, scales: { y: { beginAtZero: true } } }
+            });
+        }
+
+        function renderSkuChart(data) {
+            const ctx = document.getElementById('skuChart').getContext('2d');
+            if (charts.sku) charts.sku.destroy();
+            charts.sku = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.slice(0, 10).map(d => d.SKU),
+                    datasets: [{ label: '退货金额', data: data.slice(0, 10).map(d => d.退货金额), backgroundColor: '#8b5cf6' }]
+                },
+                options: { indexAxis: 'y', responsive: true }
+            });
+        }
+
+        function renderDailyChart(data) {
+            const ctx = document.getElementById('dailyChart').getContext('2d');
+            if (charts.daily) charts.daily.destroy();
+            charts.daily = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map(d => d['日期']),
+                    datasets: [
+                        { label: '退货订单数', data: data.map(d => d['退货订单数']), borderColor: '#3b82f6', backgroundColor: '#3b82f6', yAxisID: 'y' },
+                        { label: '退货金额', data: data.map(d => d['退货金额']), borderColor: '#10b981', backgroundColor: '#10b981', yAxisID: 'y1' }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: { display: true, ticks: { maxRotation: 45, minRotation: 45 } },
+                        y: { type: 'linear', display: true, position: 'left', title: { display: true, text: '退货订单数' } },
+                        y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: '退货金额' }, grid: { drawOnChartArea: false } }
+                    }
+                }
+            });
+        }
+
+        function renderMonthlyReturnRateChart(data) {
+            const ctx = document.getElementById('monthlyReturnRateChart').getContext('2d');
+            if (charts.monthlyReturnRate) charts.monthlyReturnRate.destroy();
+            charts.monthlyReturnRate = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map(d => d['月份']),
+                    datasets: [
+                        { label: '总订单数', data: data.map(d => d['总订单数']), borderColor: '#3b82f6', backgroundColor: '#3b82f6', yAxisID: 'y' },
+                        { label: '退货订单数', data: data.map(d => d['退货订单数']), borderColor: '#ef4444', backgroundColor: '#ef4444', yAxisID: 'y' },
+                        { label: '退货率', data: data.map(d => d['退货率']), borderColor: '#f59e0b', backgroundColor: '#f59e0b', yAxisID: 'y1' }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: { display: true, ticks: { maxRotation: 45, minRotation: 45 } },
+                        y: { type: 'linear', display: true, position: 'left', title: { display: true, text: '订单数' } },
+                        y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: '退货率(%)' }, grid: { drawOnChartArea: false } }
+                    }
+                }
+            });
+        }
+
+        function renderWeeklyReturnRateChart(data) {
+            const ctx = document.getElementById('weeklyReturnRateChart').getContext('2d');
+            if (charts.weeklyReturnRate) charts.weeklyReturnRate.destroy();
+            // 只显示最近20周的数据，避免太密集
+            const recentData = data.slice(-20);
+            charts.weeklyReturnRate = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: recentData.map(d => d['时段']),
+                    datasets: [
+                        { label: '退货率', data: recentData.map(d => d['退货率']), borderColor: '#ef4444', backgroundColor: '#ef4444' }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: { display: true, ticks: { maxRotation: 45, minRotation: 45 } },
+                        y: { beginAtZero: true, title: { display: true, text: '退货率(%)' } }
+                    }
+                }
+            });
+        }
+
+        // 上传表单提交
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const form = e.target;
+            const progress = document.getElementById('uploadProgress');
+            const formEl = document.getElementById('uploadForm');
+
+            formEl.classList.add('hidden');
+            progress.classList.remove('hidden');
+
+            const version = document.getElementById('versionDate').value;
+            const returnFile = document.getElementById('returnFile').files[0];
+            const allOrdersFile = document.getElementById('allOrdersFile').files[0];
+
+            const formData = new FormData();
+            formData.append('version', version);
+            formData.append('return_file', returnFile);
+            if (allOrdersFile) formData.append('all_orders_file', allOrdersFile);
+
+            try {
+                const resp = await fetch('/return/api/upload', { method: 'POST', body: formData });
+                const result = await resp.json();
+                if (!result.success) throw new Error(result.errors?.join(', ') || '上传失败');
+
+                // 触发分析
+                const analyzeResp = await fetch('/return/api/analyze', {
+                    method: 'POST',
+                    body: new URLSearchParams({ version })
+                });
+                const analyzeResult = await analyzeResp.json();
+                if (!analyzeResult.success) throw new Error(analyzeResult.error || '分析失败');
+
+                hideUploadModal();
+                await loadVersions();
+                loadData(version);
+            } catch (e) {
+                alert('错误: ' + e.message);
+                formEl.classList.remove('hidden');
+                progress.classList.add('hidden');
+            }
+        });
+
+        // 版本切换
+        document.getElementById('versionSelect').addEventListener('change', (e) => {
+            if (e.target.value) loadData(e.target.value);
+        });
+
+        // 初始化
+        loadVersions();
+    </script>
+</body>
+</html>

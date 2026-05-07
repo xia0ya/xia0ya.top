@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}数据分析 - Amazon评论爬虫{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">数据分析</h1>
+
+<div class="bg-white rounded-lg shadow p-4 mb-6">
+    <form method="get" class="flex flex-wrap gap-4 items-end">
+        <div>
+            <label class="block text-gray-700 text-sm mb-1">ASIN筛选</label>
+            <select name="asin" class="border rounded px-3 py-2">
+                <option value="">全部</option>
+                {% for a in asins %}
+                <option value="{{ a }}" {% if filters.asin == a %}selected{% endif %}>{{ a }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="block text-gray-700 text-sm mb-1">最低评分</label>
+            <input type="number" name="min_rating" min="1" max="5" value="{{ filters.min_rating or '' }}"
+                class="border rounded px-3 py-2 w-20" placeholder="1-5">
+        </div>
+        <div>
+            <label class="block text-gray-700 text-sm mb-1">最高评分</label>
+            <input type="number" name="max_rating" min="1" max="5" value="{{ filters.max_rating or '' }}"
+                class="border rounded px-3 py-2 w-20" placeholder="1-5">
+        </div>
+        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+            筛选
+        </button>
+    </form>
+</div>
+
+{% if stats.total_reviews == 0 %}
+<div class="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+    暂无数据，请先爬取评论
+</div>
+{% else %}
+
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+    <div class="bg-white rounded-lg shadow p-4">
+        <div class="text-gray-500 text-sm">总评论数</div>
+        <div class="text-3xl font-bold">{{ stats.total_reviews }}</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4">
+        <div class="text-gray-500 text-sm">商品数</div>
+        <div class="text-3xl font-bold">{{ stats.total_products }}</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4">
+        <div class="text-gray-500 text-sm">平均评分</div>
+        <div class="text-3xl font-bold">{{ stats.avg_rating }}</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4">
+        <div class="text-gray-500 text-sm">负面评论</div>
+        <div class="text-3xl font-bold text-red-600">{{ sentiment.negative }}</div>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+    <div class="bg-white rounded-lg shadow p-4">
+        <h2 class="text-lg font-bold mb-4">评分分布</h2>
+        <div class="space-y-2">
+            {% for star, count in stats.rating_distribution.items() %}
+            <div class="flex items-center">
+                <span class="w-12">{{ star }}星</span>
+                <div class="flex-1 bg-gray-200 rounded-full h-4">
+                    <div class="bg-blue-600 h-4 rounded-full"
+                        style="width: {{ (count / stats.total_reviews * 100)|round }}%"></div>
+                </div>
+                <span class="ml-2 text-sm text-gray-500">{{ count }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow p-4">
+        <h2 class="text-lg font-bold mb-4">情感分析</h2>
+        <div class="space-y-3">
+            <div class="flex items-center justify-between">
+                <span class="text-green-600">正面</span>
+                <div class="flex-1 mx-4">
+                    <div class="bg-gray-200 rounded-full h-4">
+                        <div class="bg-green-500 h-4 rounded-full"
+                            style="width: {{ sentiment.percentages.positive }}%"></div>
+                    </div>
+                </div>
+                <span>{{ sentiment.percentages.positive }}%</span>
+            </div>
+            <div class="flex items-center justify-between">
+                <span class="text-gray-600">中性</span>
+                <div class="flex-1 mx-4">
+                    <div class="bg-gray-200 rounded-full h-4">
+                        <div class="bg-gray-500 h-4 rounded-full"
+                            style="width: {{ sentiment.percentages.neutral }}%"></div>
+                    </div>
+                </div>
+                <span>{{ sentiment.percentages.neutral }}%</span>
+            </div>
+            <div class="flex items-center justify-between">
+                <span class="text-red-600">负面</span>
+                <div class="flex-1 mx-4">
+                    <div class="bg-gray-200 rounded-full h-4">
+                        <div class="bg-red-500 h-4 rounded-full"
+                            style="width: {{ sentiment.percentages.negative }}%"></div>
+                    </div>
+                </div>
+                <span>{{ sentiment.percentages.negative }}%</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+    <div class="bg-white rounded-lg shadow p-4">
+        <h2 class="text-lg font-bold mb-4">好评关键词</h2>
+        <div class="flex flex-wrap gap-2">
+            {% for word, count in keywords.positive[:15] %}
+            <span class="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm">
+                {{ word }} ({{ count }})
+            </span>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4">
+        <h2 class="text-lg font-bold mb-4">差评关键词</h2>
+        <div class="flex flex-wrap gap-2">
+            {% for word, count in keywords.negative[:15] %}
+            <span class="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm">
+                {{ word }} ({{ count }})
+            </span>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+{% if trend %}
+<div class="bg-white rounded-lg shadow p-4">
+    <h2 class="text-lg font-bold mb-4">时间趋势</h2>
+    <table class="min-w-full">
+        <thead>
+            <tr>
+                <th class="px-4 py-2 text-left">月份</th>
+                <th class="px-4 py-2 text-left">评论数</th>
+                <th class="px-4 py-2 text-left">平均评分</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in trend %}
+            <tr>
+                <td class="px-4 py-2">{{ t.month }}</td>
+                <td class="px-4 py-2">{{ t.count }}</td>
+                <td class="px-4 py-2">{{ t.avg_rating }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% if wordcloud.wordcloud_path %}
+<div class="bg-white rounded-lg shadow p-4">
+    <h2 class="text-lg font-bold mb-4">词云</h2>
+    <img src="{{ wordcloud.wordcloud_path }}" alt="词云" class="max-w-full h-auto">
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}
